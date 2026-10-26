@@ -1,0 +1,49 @@
+# TCG Tracker configuration. Paths are relative to this file.
+
+[games]
+# Names as TCGplayer lists them. Run `python -m tcgtrack games` to see every option
+# (e.g. "Pokemon", "Magic", "YuGiOh", "One Piece Card Game", "Lorcana TCG", "Pokemon Japan").
+track = ["Pokemon"]
+
+[storage]
+db_path = "data/prices.sqlite"
+# Prices below this are not stored at all (keeps the database small).
+min_store_price = 0.25
+# History pulled from the TCGCSV archive: every day for the last N days,
+# then one point per week back to `weekly_backfill_days`.
+daily_backfill_days = 14
+weekly_backfill_days = 91
+# How often to re-download product names/rarities for each set.
+product_refresh_days = 7
+
+[report]
+output_dir = "reports"
+# Cards/products cheaper than this are left out of the report (too noisy).
+min_price = 5.00
+# Rows per section.
+top_n = 25
+
+[signals]
+# Early breakout: up this much in 7 days, still accelerating, but not already run up too far.
+breakout_min_7d = 0.10
+breakout_max_30d = 0.60
+# Steady climber: up this much in 30 days on a clean trend line (R² 0-1).
+climber_min_30d = 0.12
+climber_min_r2 = 0.70
+# Possibly peaking: big 30-day run that has stalled or is decelerating.
+peak_min_30d = 0.40
+# Rebound: this far below its 90-day high and turning up.
+rebound_off_high = -0.30
+rebound_min_7d = 0.08
+# Falling.
+falling_7d = -0.10
+falling_30d = -0.20
+
+# Cards you always want to see, whatever their price or signal.
+# Match by TCGplayer product id, or by name (and optionally set) substring.
+[[watchlist]]
+name = "Charizard ex"
+set = "Obsidian Flames"
+
+[[watchlist]]
+name = "Umbreon ex"

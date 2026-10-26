@@ -1,0 +1,90 @@
+name: TCG prices
+
+on:
+  schedule:
+    - cron: "41 21 * * *"   # every day, after TCGCSV's ~20:00 UTC refresh
+  workflow_dispatch:
+    inputs:
+      report:
+        description: "Build the market report now (otherwise only on Sundays)"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency: tcg-prices
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    outputs:
+      reported: ${{ steps.report.outputs.reported }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+
+      # The price database lives in the Actions cache. If it is ever evicted,
+      # the next run rebuilds the history from the TCGCSV archive automatically.
+      - name: Restore price database
+        uses: actions/cache/restore@v4
+        with:
+          path: data
+          key: prices-db-${{ github.run_id }}
+          restore-keys: prices-db-
+
+      - name: Download today's prices (and backfill any missing history)
+        run: python -m tcgtrack update
+
+      - name: Save price database
+        uses: actions/cache/save@v4
+        with:
+          path: data
+          key: prices-db-${{ github.run_id }}
+
+      - name: Weekly report
+        id: report
+        env:
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          REPORT_TO: ${{ secrets.REPORT_TO }}
+          REPORT_URL: ${{ vars.REPORT_URL }}
+        if: github.event_name == 'workflow_dispatch' && inputs.report || github.event_name == 'schedule'
+        run: |
+          if [ "${{ github.event_name }}" = "schedule" ] && [ "$(date -u +%u)" != "7" ]; then
+            echo "Not Sunday; skipping report."; exit 0
+          fi
+          python -m tcgtrack report $( [ -n "$SMTP_HOST" ] && echo --email )
+          git config user.name "tcg-tracker bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add reports
+          git commit -m "Market report $(date -u +%F)" || echo "No changes"
+          git push
+          echo "reported=true" >> "$GITHUB_OUTPUT"
+
+      - name: Upload site
+        if: steps.report.outputs.reported == 'true'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: reports
+
+  # Publishes the reports to GitHub Pages. Turn on Pages with "Source: GitHub Actions"
+  # (Settings → Pages). Remove this job if you only want the email.
+  publish:
+    needs: collect
+    if: needs.collect.outputs.reported == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4
